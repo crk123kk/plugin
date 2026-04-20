@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>提问列表</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>📋 提问列表</h1>
+      <button id="refreshBtn" class="refresh-btn" title="刷新列表">🔄</button>
+    </header>
+    <div id="questionList" class="question-list">
+      <div class="loading">正在加载...</div>
+    </div>
+    <div id="emptyState" class="empty-state" style="display: none;">
+      <p>😕 当前页面没有找到提问信息</p>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
