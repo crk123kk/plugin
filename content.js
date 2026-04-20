@@ -58,7 +58,6 @@
       });
     }
 
-    console.log(`[对话助手] 扫描模式：${scanMode}, 扫描到 ${questionElementsMap.size} 条对话`);
     return Array.from(questionElementsMap.values());
   }
 
@@ -157,6 +156,4 @@
   } else {
     document.addEventListener('DOMContentLoaded', scanQuestions);
   }
-
-  console.log('[对话助手] Content script 已加载');
 })();

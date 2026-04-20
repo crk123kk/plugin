@@ -2,8 +2,10 @@ let cachedQuestions = [];
 let currentScanMode = 'data-virtual-list-item-key';
 
 document.addEventListener('DOMContentLoaded', () => {
-  // 加载保存的模式
-  loadScanMode();
+  // 加载保存的模式并自动扫描
+  loadScanMode().then(() => {
+    forceRescan();
+  });
 
   document.getElementById('refreshBtn').addEventListener('click', () => {
     forceRescan();
@@ -19,19 +21,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const modeSelectOptions = document.getElementById('modeSelectOptions');
   const customOptions = modeSelectOptions.querySelectorAll('.custom-option');
 
-  console.log(`[DEBUG] 下拉框初始化，找到 ${customOptions.length} 个选项`);
-
   customSelect.addEventListener('click', (e) => {
     e.stopPropagation();
-    console.log(`[DEBUG] 点击下拉框`);
     customSelect.classList.toggle('open');
   });
 
-  customOptions.forEach((option, index) => {
-    console.log(`[DEBUG] 绑定选项 ${index}: ${option.textContent}, value=${option.dataset.value}`);
+  customOptions.forEach((option) => {
     option.addEventListener('click', (e) => {
       e.stopPropagation();
-      console.log(`[DEBUG] 点击选项：${option.textContent}`);
       const selectedValue = option.dataset.value;
 
       // 更新选中状态
@@ -43,9 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 更新扫描模式并刷新
       currentScanMode = selectedValue;
-      console.log(`[DEBUG] 切换模式：${selectedValue}`);
       saveScanMode().then(() => {
-        console.log(`[DEBUG] 模式已保存：${currentScanMode}`);
         forceRescan();
       });
 
@@ -92,6 +87,7 @@ async function loadScanMode() {
   } catch (error) {
     console.error('加载模式失败:', error);
   }
+  return;
 }
 
 // 更新模式徽章显示
@@ -111,8 +107,6 @@ async function forceRescan() {
   const emptyStateEl = document.getElementById('emptyState');
   const questionCountEl = document.getElementById('questionCount');
 
-  console.log(`[DEBUG] forceRescan 调用，当前模式：${currentScanMode}`);
-
   // 按钮旋转动画
   const btn = document.getElementById('refreshBtn');
   btn.style.animation = 'spin 0.5s ease-in-out';
@@ -131,8 +125,6 @@ async function forceRescan() {
   try {
     const tabId = await getCurrentTabId();
 
-    console.log(`[DEBUG] 准备执行 scanPage，模式：${currentScanMode}`);
-
     // 使用 executeScript 直接在页面中执行扫描代码
     const result = await chrome.scripting.executeScript({
       target: { tabId },
@@ -140,11 +132,8 @@ async function forceRescan() {
       args: [currentScanMode]
     });
 
-    console.log(`[DEBUG] scanPage 执行结果:`, result);
-
     if (result && result[0] && result[0].result) {
       const response = result[0].result;
-      console.log(`[DEBUG] 扫描到 ${response.count} 条记录`);
       if (response.questions && response.questions.length > 0) {
         cachedQuestions = response.questions;
         questionCountEl.textContent = `共 ${response.questions.length} 条记录`;
@@ -177,8 +166,6 @@ function scanPage(scanMode) {
     if (mode === 'data-virtual-list-item-key') {
       const elements = document.querySelectorAll('[data-virtual-list-item-key]');
 
-      console.log(`[DEBUG] deepseek 模式找到 ${elements.length} 个元素`);
-
       elements.forEach((el) => {
         const text = el.textContent?.trim();
         if (text && text.length > 0 && text.length < 1000) {
@@ -196,14 +183,6 @@ function scanPage(scanMode) {
     } else if (mode === 'data-turn') {
       // Turn 模式：扫描 data-turn="user" 的元素
       const userElements = document.querySelectorAll('[data-turn="user"]');
-      console.log(`[DEBUG] Turn 模式找到 [data-turn="user"] 共 ${userElements.length} 个元素`);
-
-      // 打印前 5 个元素的详细信息
-      userElements.forEach((el, i) => {
-        if (i < 5) {
-          console.log(`[DEBUG] 元素 ${i}: tagName=${el.tagName}, class=${el.className?.substring(0, 50)}, data-turn-id=${el.getAttribute('data-turn-id')}, data-message-id=${el.getAttribute('data-message-id')}`);
-        }
-      });
 
       userElements.forEach((el) => {
         // 优先获取 data-turn-id，如果没有则使用 data-message-id
@@ -256,7 +235,6 @@ function scanPage(scanMode) {
   }
 
   const questions = scanQuestions(scanMode);
-  console.log(`[对话助手] 扫描模式：${scanMode}, 扫描到 ${questions.length} 条记录`);
 
   return {
     success: true,
@@ -439,11 +417,9 @@ function scrollToElement(key, scanMode) {
       element.classList.remove('dialog-highlight');
     }, 2000);
 
-    console.log(`[对话助手] 成功跳转到元素：${element.tagName}`);
     return true;
   }
 
-  console.log(`[对话助手] 未找到元素，key=${key}, scanMode=${scanMode}`);
   return false;
 }
 

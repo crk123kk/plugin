@@ -1,6 +1,8 @@
-# 零壹对话列表 - Chrome 插件
+# 零壹对话总结助手 - Chrome 插件
 
-一个用于展示页面中提问信息列表的 Chrome 浏览器插件，固定在浏览器右侧侧边栏。
+一个用于自动扫描并总结页面中对话信息的 Chrome 浏览器插件，固定在浏览器右侧侧边栏。
+
+**开发人：零壹**
 
 ## 功能特点
 
@@ -37,6 +39,7 @@
 ```
 plugin/
 ├── manifest.json      # 插件配置文件
+├── icon.svg           # 插件图标
 ├── sidepanel.html     # 侧边栏 HTML
 ├── sidepanel.css      # 侧边栏样式
 ├── sidepanel.js       # 侧边栏逻辑

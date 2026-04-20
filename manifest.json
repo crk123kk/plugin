@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "对话列表助手",
+  "name": "零壹对话总结助手",
   "version": "1.0.0",
-  "description": "展示页面中的对话信息列表，点击可跳转到对应位置",
+  "description": "零壹对话总结助手 - 自动扫描并总结页面中的对话信息，点击可跳转到对应位置",
   "permissions": [
     "activeTab",
     "sidePanel",
@@ -19,7 +19,19 @@
   "background": {
     "service_worker": "background.js"
   },
+  "icons": {
+    "16": "icon.png",
+    "32": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
   "action": {
-    "default_title": "打开对话列表"
+    "default_title": "零壹对话总结助手",
+    "default_icon": {
+      "16": "icon.png",
+      "32": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
   }
 }
