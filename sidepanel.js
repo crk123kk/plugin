@@ -50,7 +50,7 @@ function updateModeBadge() {
   const modeBadge = document.getElementById('currentMode');
   const modeSelect = document.getElementById('scanModeSelect');
   const selectedText = modeSelect.options[modeSelect.selectedIndex]?.text;
-  modeBadge.textContent = selectedText || 'Key 模式';
+  modeBadge.textContent = selectedText || 'deepseek';
 }
 
 // 获取当前活动标签页 ID
