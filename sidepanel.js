@@ -1,8 +1,10 @@
 let cachedQuestions = [];
 let currentTabId = null;
+let currentScanMode = 'data-virtual-list-item-key';
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadQuestions();
+  // 加载保存的模式
+  loadScanMode();
 
   document.getElementById('refreshBtn').addEventListener('click', () => {
     forceRescan();
@@ -11,7 +13,45 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('searchInput').addEventListener('input', (e) => {
     filterQuestions(e.target.value);
   });
+
+  document.getElementById('scanModeSelect').addEventListener('change', (e) => {
+    currentScanMode = e.target.value;
+    saveScanMode();
+    updateModeBadge();
+    forceRescan();
+  });
 });
+
+// 保存扫描模式到 chrome storage
+async function saveScanMode() {
+  try {
+    await chrome.storage.local.set({ scanMode: currentScanMode });
+  } catch (error) {
+    console.error('保存模式失败:', error);
+  }
+}
+
+// 从 chrome storage 加载扫描模式
+async function loadScanMode() {
+  try {
+    const result = await chrome.storage.local.get(['scanMode']);
+    if (result.scanMode) {
+      currentScanMode = result.scanMode;
+      document.getElementById('scanModeSelect').value = currentScanMode;
+    }
+  } catch (error) {
+    console.error('加载模式失败:', error);
+  }
+  updateModeBadge();
+}
+
+// 更新模式徽章显示
+function updateModeBadge() {
+  const modeBadge = document.getElementById('currentMode');
+  const modeSelect = document.getElementById('scanModeSelect');
+  const selectedText = modeSelect.options[modeSelect.selectedIndex]?.text;
+  modeBadge.textContent = selectedText || 'Key 模式';
+}
 
 // 获取当前活动标签页 ID
 async function getCurrentTabId() {
@@ -22,7 +62,7 @@ async function getCurrentTabId() {
   return tab.id;
 }
 
-// 强制重新扫描页面 - 直接执行脚本
+// 强制重新扫描页面 - 使用 executeScript 直接执行扫描
 async function forceRescan() {
   const questionListEl = document.getElementById('questionList');
   const emptyStateEl = document.getElementById('emptyState');
@@ -38,7 +78,7 @@ async function forceRescan() {
   questionListEl.innerHTML = `
     <div class="loading">
       <div class="spinner"></div>
-      <p>正在重新扫描...</p>
+      <p>正在扫描页面...</p>
     </div>
   `;
   emptyStateEl.style.display = 'none';
@@ -46,23 +86,130 @@ async function forceRescan() {
   try {
     const tabId = await getCurrentTabId();
 
-    // 先执行脚本确保 content script 已注入
-    await chrome.scripting.executeScript({
+    // 使用 executeScript 直接在页面中执行扫描代码
+    const result = await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content.js']
+      func: scanPage,
+      args: [currentScanMode]
     });
 
-    // 等待一小段时间让脚本执行
-    await new Promise(resolve => setTimeout(resolve, 200));
-
-    // 然后获取最新的问题列表
-    loadQuestions();
+    if (result && result[0] && result[0].result) {
+      const response = result[0].result;
+      if (response.questions && response.questions.length > 0) {
+        cachedQuestions = response.questions;
+        questionCountEl.textContent = `共 ${response.questions.length} 条对话`;
+        renderQuestions(response.questions);
+        emptyStateEl.style.display = 'none';
+      } else {
+        cachedQuestions = [];
+        questionCountEl.textContent = '共 0 条对话';
+        questionListEl.innerHTML = '';
+        emptyStateEl.style.display = 'flex';
+      }
+    }
 
   } catch (error) {
-    console.error('重新扫描失败:', error);
-    // 如果 scripting 失败，尝试直接发送消息
-    loadQuestions();
+    console.error('扫描失败:', error);
+    questionListEl.innerHTML = `
+      <div class="loading">
+        <p>扫描失败，请重试</p>
+      </div>
+    `;
   }
+}
+
+// 在页面中执行的扫描函数（会被序列化执行）
+function scanPage(scanMode) {
+  // 扫描函数
+  function scanQuestions(mode) {
+    const results = [];
+
+    if (mode === 'data-virtual-list-item-key') {
+      const elements = document.querySelectorAll('[data-virtual-list-item-key]');
+      console.log(`[DEBUG] Key 模式找到 ${elements.length} 个元素`);
+      elements.forEach((el) => {
+        const text = el.textContent?.trim();
+        if (text && text.length > 0 && text.length < 1000) {
+          const key = el.getAttribute('data-virtual-list-item-key');
+          results.push({
+            id: key,
+            key: key,
+            text: text.substring(0, 300),
+            selector: `[data-virtual-list-item-key="${key}"]`,
+            mode: 'key'
+          });
+        }
+      });
+    } else if (mode === 'data-turn') {
+      // Turn 模式：扫描 data-turn="user" 的元素
+      const userElements = document.querySelectorAll('[data-turn="user"]');
+      console.log(`[DEBUG] Turn 模式找到 [data-turn="user"] 共 ${userElements.length} 个元素`);
+
+      // 打印前 5 个元素的详细信息
+      userElements.forEach((el, i) => {
+        if (i < 5) {
+          console.log(`[DEBUG] 元素 ${i}: tagName=${el.tagName}, class=${el.className?.substring(0, 50)}, data-turn-id=${el.getAttribute('data-turn-id')}, data-message-id=${el.getAttribute('data-message-id')}`);
+        }
+      });
+
+      userElements.forEach((el) => {
+        // 优先获取 data-turn-id，如果没有则使用 data-message-id
+        let turnId = el.getAttribute('data-turn-id');
+        const messageId = el.getAttribute('data-message-id');
+
+        if (!turnId && messageId) {
+          turnId = messageId;
+        }
+
+        if (!turnId) {
+          turnId = `turn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        }
+
+        // 查找内部的文本内容
+        // 优先从 .user-message-bubble-color 或 [data-message-id] 中获取
+        let textEl = el.querySelector('.user-message-bubble-color');
+        if (!textEl) {
+          textEl = el.querySelector('[data-message-id]');
+        }
+        const text = textEl ? textEl.textContent?.trim() : el.textContent?.trim();
+
+        if (text && text.length > 0 && text.length < 1000) {
+          // 构建选择器
+          let selector = `[data-turn="user"]`;
+          if (el.getAttribute('data-turn-id')) {
+            selector += `[data-turn-id="${el.getAttribute('data-turn-id')}"]`;
+          } else if (el.getAttribute('data-message-id')) {
+            selector += `[data-message-id="${el.getAttribute('data-message-id')}"]`;
+          }
+          // 如果是 section 标签，加上标签名
+          if (el.tagName.toLowerCase() === 'section') {
+            selector = `section${selector}`;
+          }
+
+          results.push({
+            id: turnId,
+            key: turnId,
+            text: text.substring(0, 300),
+            selector: selector,
+            mode: 'turn',
+            type: 'user',
+            tagName: el.tagName.toLowerCase()
+          });
+        }
+      });
+    }
+
+    return results;
+  }
+
+  const questions = scanQuestions(scanMode);
+  console.log(`[对话助手] 扫描模式：${scanMode}, 扫描到 ${questions.length} 条对话`);
+
+  return {
+    success: true,
+    count: questions.length,
+    questions: questions
+  };
 }
 
 async function loadQuestions() {
@@ -83,23 +230,16 @@ async function loadQuestions() {
   try {
     const tabId = await getCurrentTabId();
 
-    chrome.tabs.sendMessage(tabId, { action: 'getQuestions' }, (response) => {
-      if (chrome.runtime.lastError) {
-        // 如果消息发送失败，尝试先注入脚本再重试
-        console.log('消息发送失败，尝试注入脚本...');
+    // 使用 executeScript 直接在页面中执行扫描代码
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: scanPage,
+      args: [currentScanMode]
+    });
 
-        chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['content.js']
-        }, () => {
-          setTimeout(() => {
-            loadQuestions();
-          }, 300);
-        });
-        return;
-      }
-
-      if (response && response.questions && response.questions.length > 0) {
+    if (result && result[0] && result[0].result) {
+      const response = result[0].result;
+      if (response.questions && response.questions.length > 0) {
         cachedQuestions = response.questions;
         questionCountEl.textContent = `共 ${response.questions.length} 条对话`;
         renderQuestions(response.questions);
@@ -110,7 +250,8 @@ async function loadQuestions() {
         questionListEl.innerHTML = '';
         emptyStateEl.style.display = 'flex';
       }
-    });
+    }
+
   } catch (error) {
     console.error('加载对话失败:', error);
     questionListEl.innerHTML = `
@@ -184,21 +325,68 @@ function filterQuestions(searchText) {
 async function scrollToQuestion(question) {
   const tabId = await getCurrentTabId();
 
-  // 先重新扫描页面获取最新 DOM
-  await new Promise((resolve) => {
-    chrome.tabs.sendMessage(tabId, { action: 'rescan' }, (response) => {
-      resolve(response);
+  try {
+    // 使用 executeScript 直接执行滚动操作
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: scrollToElement,
+      args: [question.key, currentScanMode]
     });
+  } catch (error) {
+    console.error('跳转失败:', error);
+  }
+}
+
+// 在页面中执行的滚动函数
+function scrollToElement(key, scanMode) {
+  // 移除之前的高亮
+  document.querySelectorAll('.dialog-highlight').forEach(el => {
+    el.classList.remove('dialog-highlight');
+    el.style.outline = '';
+    el.style.outlineOffset = '';
   });
 
-  // 等待一小段时间让 DOM 稳定
-  await new Promise(resolve => setTimeout(resolve, 100));
+  let element = null;
 
-  // 然后再跳转
-  chrome.tabs.sendMessage(tabId, {
-    action: 'scrollToQuestion',
-    key: question.key
-  });
+  // 根据模式查找元素
+  if (scanMode === 'data-virtual-list-item-key') {
+    element = document.querySelector(`[data-virtual-list-item-key="${key}"]`);
+  } else if (scanMode === 'data-turn') {
+    // Turn 模式：优先使用 data-turn-id 查找
+    element = document.querySelector(`[data-turn="user"][data-turn-id="${key}"]`);
+
+    // 如果没找到，尝试使用 data-message-id
+    if (!element) {
+      element = document.querySelector(`[data-turn="user"][data-message-id="${key}"]`);
+    }
+  }
+
+  if (element) {
+    // 滚动到元素
+    element.scrollIntoView({ behavior: 'auto', block: 'center' });
+
+    // 添加高亮样式
+    element.classList.add('dialog-highlight');
+    element.style.transition = 'all 0.3s';
+    element.style.outline = '3px solid #667eea';
+    element.style.outlineOffset = '2px';
+    element.style.borderRadius = '4px';
+    element.style.backgroundColor = 'rgba(102, 126, 234, 0.1)';
+
+    // 2 秒后移除高亮
+    setTimeout(() => {
+      element.style.outline = '';
+      element.style.outlineOffset = '';
+      element.style.backgroundColor = '';
+      element.classList.remove('dialog-highlight');
+    }, 2000);
+
+    console.log(`[对话助手] 成功跳转到元素：${element.tagName}`);
+    return true;
+  }
+
+  console.log(`[对话助手] 未找到元素，key=${key}, scanMode=${scanMode}`);
+  return false;
 }
 
 function escapeHtml(text) {

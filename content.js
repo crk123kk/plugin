@@ -4,58 +4,68 @@
 (function() {
   // 存储页面中的对话元素引用
   let questionElementsMap = new Map();
+  // 当前扫描模式
+  let currentScanMode = 'data-virtual-list-item-key';
 
   // 初始化：扫描页面中的对话
-  function scanQuestions() {
+  function scanQuestions(mode) {
+    const scanMode = mode || currentScanMode;
+    currentScanMode = scanMode;
     questionElementsMap.clear();
 
-    // 使用 data-virtual-list-item-key 属性来收集节点
-    const elements = document.querySelectorAll('[data-virtual-list-item-key]');
+    if (scanMode === 'data-virtual-list-item-key') {
+      // Key 模式：只扫描 data-virtual-list-item-key
+      const elements = document.querySelectorAll('[data-virtual-list-item-key]');
 
-    elements.forEach((el) => {
-      const text = el.textContent?.trim();
+      elements.forEach((el) => {
+        const text = el.textContent?.trim();
 
-      if (text && text.length > 0 && text.length < 1000) {
-        const key = el.getAttribute('data-virtual-list-item-key');
-        const selector = `[data-virtual-list-item-key="${key}"]`;
+        if (text && text.length > 0 && text.length < 1000) {
+          const key = el.getAttribute('data-virtual-list-item-key');
+          const selector = `[data-virtual-list-item-key="${key}"]`;
 
-        questionElementsMap.set(key, {
-          id: key,
-          key: key,
-          text: text.substring(0, 300),
-          selector: selector
-        });
-      }
-    });
+          questionElementsMap.set(key, {
+            id: key,
+            key: key,
+            text: text.substring(0, 300),
+            selector: selector,
+            mode: 'key'
+          });
+        }
+      });
+    } else if (scanMode === 'data-turn') {
+      // Turn 模式：只扫描 data-turn="user"
+      const userElements = document.querySelectorAll('[data-turn="user"]');
 
-    // 使用 data-turn="user" 属性来收集用户对话节点
-    const userElements = document.querySelectorAll('[data-turn="user"]');
+      userElements.forEach((el) => {
+        const text = el.textContent?.trim();
 
-    userElements.forEach((el) => {
-      const text = el.textContent?.trim();
+        if (text && text.length > 0 && text.length < 1000) {
+          // 生成唯一标识
+          const messageId = el.getAttribute('data-message-id') || Date.now();
+          const key = `user_${messageId}_${Math.random().toString(36).substr(2, 9)}`;
+          const selector = `[data-turn="user"][data-message-id="${messageId}"]`;
 
-      if (text && text.length > 0 && text.length < 1000) {
-        // 生成唯一标识
-        const messageId = el.getAttribute('data-message-id') || Date.now();
-        const key = `user_${messageId}_${Math.random().toString(36).substr(2, 9)}`;
-        const selector = `[data-turn="user"][data-message-id="${messageId}"]`;
+          questionElementsMap.set(key, {
+            id: key,
+            key: key,
+            text: text.substring(0, 300),
+            selector: selector,
+            mode: 'turn',
+            type: 'user'
+          });
+        }
+      });
+    }
 
-        questionElementsMap.set(key, {
-          id: key,
-          key: key,
-          text: text.substring(0, 300),
-          selector: selector,
-          type: 'user'
-        });
-      }
-    });
-
-    console.log(`[对话助手] 扫描到 ${questionElementsMap.size} 条对话`);
+    console.log(`[对话助手] 扫描模式：${scanMode}, 扫描到 ${questionElementsMap.size} 条对话`);
     return Array.from(questionElementsMap.values());
   }
 
   // 高亮并滚动到元素（增强版，支持动态内容）
-  function highlightAndScroll(key) {
+  function highlightAndScroll(key, mode) {
+    const scanMode = mode || currentScanMode;
+
     // 移除之前的高亮
     document.querySelectorAll('.dialog-highlight').forEach(el => {
       el.classList.remove('dialog-highlight');
@@ -65,12 +75,10 @@
 
     let element = null;
 
-    // 尝试多种选择器查找元素
-    // 1. 先尝试 data-virtual-list-item-key
-    element = document.querySelector(`[data-virtual-list-item-key="${key}"]`);
-
-    // 2. 如果是 user_ 开头的 key，尝试 data-turn="user"
-    if (!element && key.startsWith('user_')) {
+    // 根据模式查找元素
+    if (scanMode === 'data-virtual-list-item-key') {
+      element = document.querySelector(`[data-virtual-list-item-key="${key}"]`);
+    } else if (scanMode === 'data-turn') {
       // 尝试匹配 data-message-id
       const match = key.match(/user_([^_]+)_[a-z0-9]+$/);
       if (match && match[1]) {
@@ -89,10 +97,11 @@
 
     function tryScroll() {
       if (!element) {
-        element = document.querySelector(`[data-virtual-list-item-key="${key}"]`);
-      }
-      if (!element && key.startsWith('user_')) {
-        element = document.querySelector('[data-turn="user"]');
+        if (scanMode === 'data-virtual-list-item-key') {
+          element = document.querySelector(`[data-virtual-list-item-key="${key}"]`);
+        } else if (scanMode === 'data-turn') {
+          element = document.querySelector('[data-turn="user"]');
+        }
       }
 
       if (element) {
@@ -148,17 +157,17 @@
   // 监听消息
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'getQuestions') {
-      const questions = scanQuestions();
+      const questions = scanQuestions(request.mode);
       sendResponse({ questions: questions });
     }
 
     if (request.action === 'scrollToQuestion') {
-      const found = highlightAndScroll(request.key);
+      const found = highlightAndScroll(request.key, request.mode);
       sendResponse({ success: found });
     }
 
     if (request.action === 'rescan') {
-      const questions = scanQuestions();
+      const questions = scanQuestions(request.mode);
       sendResponse({
         success: true,
         count: questions.length,

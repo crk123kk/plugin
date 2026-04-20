@@ -6,6 +6,7 @@
   "permissions": [
     "activeTab",
     "sidePanel",
+    "storage",
     "scripting"
   ],
   "host_permissions": [
@@ -19,12 +20,5 @@
   },
   "action": {
     "default_title": "打开对话列表"
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_end"
-    }
-  ]
+  }
 }
