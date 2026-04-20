@@ -1,5 +1,4 @@
 let cachedQuestions = [];
-let currentTabId = null;
 let currentScanMode = 'data-virtual-list-item-key';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -14,11 +13,50 @@ document.addEventListener('DOMContentLoaded', () => {
     filterQuestions(e.target.value);
   });
 
-  document.getElementById('scanModeSelect').addEventListener('change', (e) => {
-    currentScanMode = e.target.value;
-    saveScanMode();
-    updateModeBadge();
-    forceRescan();
+  // 自定义下拉框交互
+  const customSelect = document.getElementById('customModeSelect');
+  const modeSelectLabel = document.getElementById('modeSelectLabel');
+  const modeSelectOptions = document.getElementById('modeSelectOptions');
+  const customOptions = modeSelectOptions.querySelectorAll('.custom-option');
+
+  console.log(`[DEBUG] 下拉框初始化，找到 ${customOptions.length} 个选项`);
+
+  customSelect.addEventListener('click', (e) => {
+    e.stopPropagation();
+    console.log(`[DEBUG] 点击下拉框`);
+    customSelect.classList.toggle('open');
+  });
+
+  customOptions.forEach((option, index) => {
+    console.log(`[DEBUG] 绑定选项 ${index}: ${option.textContent}, value=${option.dataset.value}`);
+    option.addEventListener('click', (e) => {
+      e.stopPropagation();
+      console.log(`[DEBUG] 点击选项：${option.textContent}`);
+      const selectedValue = option.dataset.value;
+
+      // 更新选中状态
+      customOptions.forEach((opt) => opt.classList.remove('selected'));
+      option.classList.add('selected');
+
+      // 更新显示文本
+      modeSelectLabel.textContent = option.textContent;
+
+      // 更新扫描模式并刷新
+      currentScanMode = selectedValue;
+      console.log(`[DEBUG] 切换模式：${selectedValue}`);
+      saveScanMode().then(() => {
+        console.log(`[DEBUG] 模式已保存：${currentScanMode}`);
+        forceRescan();
+      });
+
+      // 关闭下拉框
+      customSelect.classList.remove('open');
+    });
+  });
+
+  // 点击外部关闭下拉框
+  document.addEventListener('click', () => {
+    customSelect.classList.remove('open');
   });
 });
 
@@ -37,28 +75,33 @@ async function loadScanMode() {
     const result = await chrome.storage.local.get(['scanMode']);
     if (result.scanMode) {
       currentScanMode = result.scanMode;
-      document.getElementById('scanModeSelect').value = currentScanMode;
+      // 更新自定义下拉框显示
+      const modeSelectLabel = document.getElementById('modeSelectLabel');
+      const customOptions = document.querySelectorAll('.custom-option');
+      const selectedOption = document.querySelector(`.custom-option[data-value="${currentScanMode}"]`);
+
+      if (modeSelectLabel) {
+        modeSelectLabel.textContent = currentScanMode === 'data-virtual-list-item-key' ? 'deepseek' : 'GPT';
+      }
+
+      if (selectedOption) {
+        customOptions.forEach((opt) => opt.classList.remove('selected'));
+        selectedOption.classList.add('selected');
+      }
     }
   } catch (error) {
     console.error('加载模式失败:', error);
   }
-  updateModeBadge();
 }
 
 // 更新模式徽章显示
 function updateModeBadge() {
-  const modeBadge = document.getElementById('currentMode');
-  const modeSelect = document.getElementById('scanModeSelect');
-  const selectedText = modeSelect.options[modeSelect.selectedIndex]?.text;
-  modeBadge.textContent = selectedText || 'deepseek';
+  // 自定义下拉框已直接处理显示
 }
 
 // 获取当前活动标签页 ID
 async function getCurrentTabId() {
-  if (currentTabId) return currentTabId;
-
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  currentTabId = tab.id;
   return tab.id;
 }
 
@@ -67,6 +110,8 @@ async function forceRescan() {
   const questionListEl = document.getElementById('questionList');
   const emptyStateEl = document.getElementById('emptyState');
   const questionCountEl = document.getElementById('questionCount');
+
+  console.log(`[DEBUG] forceRescan 调用，当前模式：${currentScanMode}`);
 
   // 按钮旋转动画
   const btn = document.getElementById('refreshBtn');
@@ -86,6 +131,8 @@ async function forceRescan() {
   try {
     const tabId = await getCurrentTabId();
 
+    console.log(`[DEBUG] 准备执行 scanPage，模式：${currentScanMode}`);
+
     // 使用 executeScript 直接在页面中执行扫描代码
     const result = await chrome.scripting.executeScript({
       target: { tabId },
@@ -93,16 +140,19 @@ async function forceRescan() {
       args: [currentScanMode]
     });
 
+    console.log(`[DEBUG] scanPage 执行结果:`, result);
+
     if (result && result[0] && result[0].result) {
       const response = result[0].result;
+      console.log(`[DEBUG] 扫描到 ${response.count} 条记录`);
       if (response.questions && response.questions.length > 0) {
         cachedQuestions = response.questions;
-        questionCountEl.textContent = `共 ${response.questions.length} 条对话`;
+        questionCountEl.textContent = `共 ${response.questions.length} 条记录`;
         renderQuestions(response.questions);
         emptyStateEl.style.display = 'none';
       } else {
         cachedQuestions = [];
-        questionCountEl.textContent = '共 0 条对话';
+        questionCountEl.textContent = '共 0 条记录';
         questionListEl.innerHTML = '';
         emptyStateEl.style.display = 'flex';
       }
@@ -126,11 +176,14 @@ function scanPage(scanMode) {
 
     if (mode === 'data-virtual-list-item-key') {
       const elements = document.querySelectorAll('[data-virtual-list-item-key]');
-      console.log(`[DEBUG] Key 模式找到 ${elements.length} 个元素`);
+
+      console.log(`[DEBUG] deepseek 模式找到 ${elements.length} 个元素`);
+
       elements.forEach((el) => {
         const text = el.textContent?.trim();
         if (text && text.length > 0 && text.length < 1000) {
           const key = el.getAttribute('data-virtual-list-item-key');
+
           results.push({
             id: key,
             key: key,
@@ -162,7 +215,7 @@ function scanPage(scanMode) {
         }
 
         if (!turnId) {
-          turnId = `turn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          turnId = `turn_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
         }
 
         // 查找内部的文本内容
@@ -203,7 +256,7 @@ function scanPage(scanMode) {
   }
 
   const questions = scanQuestions(scanMode);
-  console.log(`[对话助手] 扫描模式：${scanMode}, 扫描到 ${questions.length} 条对话`);
+  console.log(`[对话助手] 扫描模式：${scanMode}, 扫描到 ${questions.length} 条记录`);
 
   return {
     success: true,
@@ -241,12 +294,12 @@ async function loadQuestions() {
       const response = result[0].result;
       if (response.questions && response.questions.length > 0) {
         cachedQuestions = response.questions;
-        questionCountEl.textContent = `共 ${response.questions.length} 条对话`;
+        questionCountEl.textContent = `共 ${response.questions.length} 条记录`;
         renderQuestions(response.questions);
         emptyStateEl.style.display = 'none';
       } else {
         cachedQuestions = [];
-        questionCountEl.textContent = '共 0 条对话';
+        questionCountEl.textContent = '共 0 条记录';
         questionListEl.innerHTML = '';
         emptyStateEl.style.display = 'flex';
       }
@@ -284,14 +337,9 @@ function renderQuestions(questions) {
     itemEl.className = 'question-item';
     itemEl.dataset.index = index;
     itemEl.innerHTML = `
-      <span class="question-index">${question.type === 'user' ? '👤' : '#'}${index + 1}</span>
-      <div class="question-text">${escapeHtml(question.text)}</div>
-      <div class="question-meta">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
-          <circle cx="12" cy="10" r="3"/>
-        </svg>
-        Key: ${escapeHtml(question.key)}
+      <span class="question-index">${index + 1}</span>
+      <div class="question-content">
+        <div class="question-text">${escapeHtml(question.text)}</div>
       </div>
     `;
 
@@ -352,12 +400,22 @@ function scrollToElement(key, scanMode) {
   if (scanMode === 'data-virtual-list-item-key') {
     element = document.querySelector(`[data-virtual-list-item-key="${key}"]`);
   } else if (scanMode === 'data-turn') {
-    // Turn 模式：优先使用 data-turn-id 查找
-    element = document.querySelector(`[data-turn="user"][data-turn-id="${key}"]`);
+    // Turn 模式：从 key 中提取 messageId
+    // key 格式：user_{messageId}_{random}
+    const match = key.match(/user_([^_]+)_[a-z0-9]+$/);
+    const messageId = match ? match[1] : key;
 
-    // 如果没找到，尝试使用 data-message-id
+    // 优先使用 data-message-id 查找
+    element = document.querySelector(`[data-turn="user"][data-message-id="${messageId}"]`);
+
+    // 如果没找到，尝试使用 data-turn-id
     if (!element) {
-      element = document.querySelector(`[data-turn="user"][data-message-id="${key}"]`);
+      element = document.querySelector(`[data-turn="user"][data-turn-id="${messageId}"]`);
+    }
+
+    // 还是没找到，就找第一个 data-turn="user" 元素
+    if (!element) {
+      element = document.querySelector('[data-turn="user"]');
     }
   }
 
